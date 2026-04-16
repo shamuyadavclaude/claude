@@ -1,11 +1,11 @@
 import os
 import random
 import psycopg2
-import psycopg2.extras
-from flask import Flask, render_template, request, session, redirect, url_for
+from flask import Flask, jsonify, request, send_from_directory
+from flask_cors import CORS
 
-app = Flask(__name__)
-app.secret_key = "hangman-secret-key-2024"
+app = Flask(__name__, static_folder="frontend/dist", static_url_path="")
+CORS(app)
 
 DB_CONFIG = {
     "host":     os.getenv("PG_HOST",     "localhost"),
@@ -52,7 +52,6 @@ WORD_LIST = [
 ]
 
 MAX_WRONG = 6
-BODY_PARTS = ["head", "body", "left_arm", "right_arm", "left_leg", "right_leg"]
 
 
 def get_db():
@@ -66,31 +65,26 @@ def init_db():
                 cur.execute(f.read())
 
 
-def audit_game_start(session_id, word, category, hint):
+def audit_game_start(word, category, hint):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO games (session_id, word, category, hint)
-                   VALUES (%s, %s, %s, %s) RETURNING id""",
-                (session_id, word, category, hint)
+                "INSERT INTO games (session_id, word, category, hint) VALUES (%s, %s, %s, %s) RETURNING id",
+                ("pwa", word, category, hint)
             )
             return cur.fetchone()[0]
 
 
-def audit_guess(game_id, letter, is_correct, wrong_count_after):
+def audit_guess(game_id, letter, is_correct, wrong_count):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO guesses (game_id, letter, is_correct, wrong_count_after)
-                   VALUES (%s, %s, %s, %s)""",
-                (game_id, letter, is_correct, wrong_count_after)
+                "INSERT INTO guesses (game_id, letter, is_correct, wrong_count_after) VALUES (%s, %s, %s, %s)",
+                (game_id, letter, is_correct, wrong_count)
             )
             cur.execute(
-                """UPDATE games
-                   SET total_guesses = total_guesses + 1,
-                       wrong_guesses = %s
-                   WHERE id = %s""",
-                (wrong_count_after, game_id)
+                "UPDATE games SET total_guesses = total_guesses + 1, wrong_guesses = %s WHERE id = %s",
+                (wrong_count, game_id)
             )
 
 
@@ -98,93 +92,89 @@ def audit_game_end(game_id, outcome):
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """UPDATE games SET outcome = %s, ended_at = NOW()
-                   WHERE id = %s""",
+                "UPDATE games SET outcome = %s, ended_at = NOW() WHERE id = %s",
                 (outcome, game_id)
             )
 
 
-def new_game_state(session_id):
+def build_display(word, guessed):
+    return [{"char": ch, "revealed": ch in guessed} for ch in word]
+
+
+# ── Serve React PWA ──────────────────────────────────────────────────────────
+
+@app.route("/")
+@app.route("/<path:path>")
+def serve_react(path=""):
+    if path and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder, "index.html")
+
+
+# ── REST API ─────────────────────────────────────────────────────────────────
+
+@app.route("/api/new", methods=["POST"])
+def api_new():
     entry = random.choice(WORD_LIST)
-    game_id = audit_game_start(session_id, entry["word"], entry["category"], entry["hint"])
-    return {
+    word = entry["word"].lower()
+    game_id = audit_game_start(word, entry["category"], entry["hint"])
+    return jsonify({
         "game_id":     game_id,
-        "word":        entry["word"].lower(),
+        "word_length": len(word),
         "category":    entry["category"],
         "hint":        entry["hint"],
+        "display":     build_display(word, []),
         "guessed":     [],
+        "wrong_letters": [],
         "wrong_count": 0,
         "status":      "playing",
+        "max_wrong":   MAX_WRONG,
+    })
+
+
+@app.route("/api/guess", methods=["POST"])
+def api_guess():
+    data    = request.get_json()
+    game_id = data.get("game_id")
+    letter  = data.get("letter", "").lower().strip()
+    word    = data.get("word", "")
+    guessed = data.get("guessed", [])
+    wrong_count = data.get("wrong_count", 0)
+    status  = data.get("status", "playing")
+
+    if status != "playing" or not (len(letter) == 1 and letter.isalpha()) or letter in guessed:
+        return jsonify({"error": "invalid guess"}), 400
+
+    guessed = guessed + [letter]
+    is_correct = letter in word
+
+    if not is_correct:
+        wrong_count += 1
+
+    wrong_letters = [ch for ch in guessed if ch not in word]
+
+    if all(ch in guessed for ch in word):
+        status = "won"
+    elif wrong_count >= MAX_WRONG:
+        status = "lost"
+
+    audit_guess(game_id, letter, is_correct, wrong_count)
+
+    if status != "playing":
+        audit_game_end(game_id, status)
+
+    resp = {
+        "display":       build_display(word, guessed),
+        "guessed":       guessed,
+        "wrong_letters": wrong_letters,
+        "wrong_count":   wrong_count,
+        "status":        status,
+        "max_wrong":     MAX_WRONG,
     }
+    if status != "playing":
+        resp["word"] = word
 
-
-def compute_display(state):
-    return [(ch, ch in state["guessed"]) for ch in state["word"]]
-
-
-def compute_wrong_letters(state):
-    return [ch for ch in state["guessed"] if ch not in state["word"]]
-
-
-@app.route("/", methods=["GET"])
-def index():
-    if "game" not in session:
-        session["game"] = new_game_state(session.sid if hasattr(session, "sid") else str(id(session)))
-    game = session["game"]
-
-    display       = compute_display(game)
-    wrong_letters = compute_wrong_letters(game)
-    parts_shown   = BODY_PARTS[: game["wrong_count"]]
-    alphabet      = list("abcdefghijklmnopqrstuvwxyz")
-
-    return render_template(
-        "index.html",
-        game=game,
-        display=display,
-        wrong_letters=wrong_letters,
-        parts_shown=parts_shown,
-        all_parts=BODY_PARTS,
-        alphabet=alphabet,
-        max_wrong=MAX_WRONG,
-    )
-
-
-@app.route("/guess", methods=["POST"])
-def guess():
-    game = session.get("game")
-    if not game or game["status"] != "playing":
-        return redirect(url_for("index"))
-
-    letter = request.form.get("letter", "").lower().strip()
-    if len(letter) == 1 and letter.isalpha() and letter not in game["guessed"]:
-        game["guessed"].append(letter)
-        is_correct = letter in game["word"]
-
-        if not is_correct:
-            game["wrong_count"] += 1
-
-        prev_status = game["status"]
-
-        if all(ch in game["guessed"] for ch in game["word"]):
-            game["status"] = "won"
-        elif game["wrong_count"] >= MAX_WRONG:
-            game["status"] = "lost"
-
-        audit_guess(game["game_id"], letter, is_correct, game["wrong_count"])
-
-        if game["status"] != "playing" and prev_status == "playing":
-            audit_game_end(game["game_id"], game["status"])
-
-        session["game"] = game
-
-    return redirect(url_for("index"))
-
-
-@app.route("/new", methods=["POST"])
-def new_game():
-    sid = session.get("_id", str(id(session)))
-    session["game"] = new_game_state(sid)
-    return redirect(url_for("index"))
+    return jsonify(resp)
 
 
 if __name__ == "__main__":
