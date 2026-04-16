@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hangman</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+<div class="container">
+  <h1>Hangman</h1>
+
+  <div class="game-area">
+
+    <!-- Left: gallows + stats -->
+    <div class="left-panel">
+      <svg class="gallows" viewBox="0 0 200 250" xmlns="http://www.w3.org/2000/svg">
+        <!-- Gallows frame -->
+        <line x1="20"  y1="230" x2="180" y2="230" stroke="#555" stroke-width="4" stroke-linecap="round"/>
+        <line x1="60"  y1="230" x2="60"  y2="20"  stroke="#555" stroke-width="4" stroke-linecap="round"/>
+        <line x1="60"  y1="20"  x2="130" y2="20"  stroke="#555" stroke-width="4" stroke-linecap="round"/>
+        <line x1="130" y1="20"  x2="130" y2="45"  stroke="#555" stroke-width="4" stroke-linecap="round"/>
+
+        <!-- Head -->
+        {% if "head" in parts_shown %}
+        <circle cx="130" cy="62" r="17" stroke="#e74c3c" stroke-width="3" fill="none"/>
+        {% endif %}
+
+        <!-- Body -->
+        {% if "body" in parts_shown %}
+        <line x1="130" y1="79"  x2="130" y2="148" stroke="#e74c3c" stroke-width="3" stroke-linecap="round"/>
+        {% endif %}
+
+        <!-- Left arm -->
+        {% if "left_arm" in parts_shown %}
+        <line x1="130" y1="98"  x2="100" y2="128" stroke="#e74c3c" stroke-width="3" stroke-linecap="round"/>
+        {% endif %}
+
+        <!-- Right arm -->
+        {% if "right_arm" in parts_shown %}
+        <line x1="130" y1="98"  x2="160" y2="128" stroke="#e74c3c" stroke-width="3" stroke-linecap="round"/>
+        {% endif %}
+
+        <!-- Left leg -->
+        {% if "left_leg" in parts_shown %}
+        <line x1="130" y1="148" x2="100" y2="188" stroke="#e74c3c" stroke-width="3" stroke-linecap="round"/>
+        {% endif %}
+
+        <!-- Right leg -->
+        {% if "right_leg" in parts_shown %}
+        <line x1="130" y1="148" x2="160" y2="188" stroke="#e74c3c" stroke-width="3" stroke-linecap="round"/>
+        {% endif %}
+      </svg>
+
+      <div class="status-bar">
+        <span>Wrong: <b>{{ game.wrong_count }}</b> / {{ max_wrong }}</span>
+        <span>Category: <b>{{ game.category }}</b></span>
+      </div>
+    </div>
+
+    <!-- Right: word, keyboard, messages -->
+    <div class="right-panel">
+
+      <div class="hint-box">
+        Hint: {{ game.hint }}
+      </div>
+
+      <!-- Word display -->
+      <div class="word-display">
+        {% for letter, revealed in display %}
+          <div class="letter-box">
+            <span class="letter-char {% if revealed %}revealed{% endif %}">
+              {% if revealed %}{{ letter | upper }}{% else %}&nbsp;{% endif %}
+            </span>
+            <div class="letter-underline"></div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <!-- Wrong letters -->
+      <div class="wrong-letters">
+        <span class="label">Missed:</span>
+        {% for ch in wrong_letters %}
+          <span class="wrong-letter">{{ ch | upper }}</span>
+        {% endfor %}
+      </div>
+
+      <!-- Game over / win message -->
+      {% if game.status == "won" %}
+      <div class="message win">
+        <p class="msg-title">You Won! 🎉</p>
+        <p class="reveal">The word was <b>{{ game.word | upper }}</b></p>
+        <form method="post" action="/new">
+          <button type="submit" class="btn-new">Play Again</button>
+        </form>
+      </div>
+
+      {% elif game.status == "lost" %}
+      <div class="message lose">
+        <p class="msg-title">Game Over!</p>
+        <p class="reveal">The word was <b>{{ game.word | upper }}</b></p>
+        <form method="post" action="/new">
+          <button type="submit" class="btn-new">Play Again</button>
+        </form>
+      </div>
+
+      {% else %}
+      <!-- Alphabet keyboard -->
+      <div class="keyboard">
+        {% for letter in alphabet %}
+          {% set already_guessed = letter in game.guessed %}
+          {% set is_correct      = already_guessed and letter in game.word %}
+          {% set is_wrong        = already_guessed and letter not in game.word %}
+
+          <form method="post" action="/guess" style="display:inline">
+            <input type="hidden" name="letter" value="{{ letter }}" />
+            <button
+              type="submit"
+              class="key {% if is_correct %}correct{% elif is_wrong %}wrong{% endif %}"
+              {% if already_guessed %}disabled{% endif %}
+            >{{ letter | upper }}</button>
+          </form>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <form method="post" action="/new" style="margin-top:12px; text-align:center">
+        <button type="submit" class="btn-restart">New Word</button>
+      </form>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>
