@@ -177,7 +177,10 @@ def api_guess():
     return jsonify(resp)
 
 
-init_db()
+try:
+    init_db()
+except Exception as e:
+    print(f"Warning: init_db failed: {e}")
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
