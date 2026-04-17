@@ -2,7 +2,7 @@ services:
   - type: web
     name: hangman
     runtime: python
-    buildCommand: pip install -r requirements.txt && cd frontend && npm install --legacy-peer-deps && npm run build
+    buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
     envVars:
       - key: PG_HOST
