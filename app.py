@@ -13,7 +13,7 @@ DB_CONFIG = {
     "dbname":   os.getenv("PG_DB",       "hangman"),
     "user":     os.getenv("PG_USER",     "postgres"),
     "password": os.getenv("PG_PASSWORD", "postgres"),
-    "sslmode":  os.getenv("PG_SSLMODE",  "require"),
+    "sslmode":  os.getenv("PG_SSLMODE",  "prefer"),
 }
 
 WORD_LIST = [
