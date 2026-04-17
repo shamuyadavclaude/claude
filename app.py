@@ -102,6 +102,19 @@ def build_display(word, guessed):
     return [{"char": ch, "revealed": ch in guessed} for ch in word]
 
 
+# ── Health check ─────────────────────────────────────────────────────────────
+
+@app.route("/api/health")
+def health():
+    try:
+        with get_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        return jsonify({"db": "ok", "host": DB_CONFIG["host"]})
+    except Exception as e:
+        return jsonify({"db": "error", "detail": str(e), "host": DB_CONFIG["host"]}), 500
+
+
 # ── Serve React PWA ──────────────────────────────────────────────────────────
 
 @app.route("/")
